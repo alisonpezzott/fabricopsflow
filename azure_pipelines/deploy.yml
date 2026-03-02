@@ -1,0 +1,81 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - src/**
+
+pr: none
+
+parameters:
+- name: deployMode
+  displayName: Deploy mode
+  type: string
+  default: selective
+  values:
+    - selective
+    - specific
+    - full
+- name: diffDepth
+  displayName: "Depth (HEAD~N)"
+  type: number
+  default: 1
+- name: itemsToDeploy
+  displayName: "Items to deploy (comma-separated, used only in 'specific' mode)"
+  type: string
+  default: " "
+
+variables:
+- group: FAB_CREDENTIALS
+
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+- checkout: self
+  persistCredentials: true
+  fetchDepth: 0
+
+# Garante UTF-8 no console do agente e propaga para os próximos steps
+- task: PowerShell@2
+  displayName: 'Set UTF-8 console'
+  inputs:
+    targetType: inline
+    pwsh: true               
+    script: |
+      [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+      $env:PYTHONUTF8 = "1"
+      $env:PYTHONIOENCODING = "utf-8"
+      Write-Host "##vso[task.setvariable variable=PYTHONUTF8;isOutput=false]1"
+      Write-Host "##vso[task.setvariable variable=PYTHONIOENCODING;isOutput=false]utf-8"
+      # Apenas log
+      Write-Host "Console OutputEncoding: $([Console]::OutputEncoding.WebName)"
+
+- task: UsePythonVersion@0
+  displayName: 'Use Python 3.12'
+  inputs:
+    versionSpec: '3.12'
+
+- script: |
+    pip install pyfabricops
+  displayName: 'Install Dependencies'
+  env:
+    PYTHONUTF8: '1'
+    PYTHONIOENCODING: 'utf-8'
+
+- script: |
+    python -X utf8 scripts/deploy.py
+  displayName: 'Run Deploy'
+  workingDirectory: $(Build.SourcesDirectory)
+  env:
+    PYTHONUTF8: '1'
+    PYTHONIOENCODING: 'utf-8'
+    DEPLOY_MODE: ${{ parameters.deployMode }}
+    DIFF_DEPTH: ${{ parameters.diffDepth }}
+    ${{ if eq(parameters.deployMode, 'specific') }}:
+      ITEMS_TO_DEPLOY: ${{ parameters.itemsToDeploy }}
+    FAB_TENANT_ID: $(FAB-TENANT-ID)
+    FAB_CLIENT_ID: $(FAB-CLIENT-ID)
+    FAB_CLIENT_SECRET: $(FAB-CLIENT-SECRET)
